@@ -9,8 +9,11 @@ user_data = {}  # Diccionario para almacenar los datos de los usuarios
 def generate_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
-secret_uuid = uuid.uuid4() # Este se habrá generado una única vez y guardado en el servidor
+def generate_token(user_uid):
+    return str(uuid.uuid5(SECRET_UUID, user_uid))
 
+# secret_uuid = uuid.uuid4() # Este se habrá generado una única vez y guardado en el servidor
+SECRET_UUID = uuid.UUID("12345678-1234-5678-1234-567812345678")
 
 @app.route('/user', methods=['PUT'])
 
@@ -25,7 +28,7 @@ async def create_user():
         return jsonify({'error': 'User already exists'}), 409
     
     uid_del_usuario_como_string = str(uuid.uuid4()) # Este se habrá generado al hacer create_user 
-    token = uuid.uuid5(secret_uuid, uid_del_usuario_como_string)
+    token = generate_token(uid_del_usuario_como_string)
 
     user_data[name] = {'uid': uid_del_usuario_como_string, 'password_hash': generate_password(password),}
     return jsonify({
@@ -43,13 +46,41 @@ async def login():
     if not name or not password:
         return jsonify({'error': 'Name and password are required'}), 400
 
+    if not name in user_data or user_data[name]['password_hash'] != generate_password(password):
+        return jsonify({'error': 'Invalid credentials'}), 401
+
+    token = generate_token(user_data[name]['uid'])
+    return jsonify({
+        'message': 'Login successful',
+        'uid': str(user_data[name]['uid']),
+        'token': str(token),
+    }), 200
+
 @app.route('/user', methods=['PATCH'])
 
 async def modify_user():
+    autorization = request.headers.get('Authorization', '')
+    parts = autorization.split()
+
+    if len(parts) != 2 or parts[0] != 'Bearer':
+        return jsonify({'error': 'Invalid authorization header'}), 401
+
+    for user in user_data.values():
+        token_esperado = generate_token(user['uid'])
+        if token_esperado == parts[1]:
+            authenticated_user = user
+            break
+    else:
+        return jsonify({'error': 'Invalid token'}), 401
+
     data = await request.get_json()
     password = data.get('password')
     if not password:
         return jsonify({'error': 'Password is required'}), 400
+
+    authenticated_user['password_hash'] = generate_password(password)
+
+    return jsonify({'message': 'Password updated successfully'}), 200
 
 if __name__ == '__main__':
     app.run(host='localhost', port=5050)
